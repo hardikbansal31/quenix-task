@@ -4,6 +4,7 @@ import {
   IsEnum,
   IsDateString,
   IsOptional,
+  IsMongoId,
 } from 'class-validator';
 import { TaskStatus, TaskPriority } from '../schemas/task.schema';
 
@@ -27,4 +28,8 @@ export class CreateTaskDto {
   @IsEnum(TaskPriority)
   @IsOptional()
   priority?: TaskPriority;
+
+  @IsMongoId()
+  @IsOptional()
+  assignedTo?: string; // Used by admins to assign tasks
 }

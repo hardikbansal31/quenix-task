@@ -1,30 +1,42 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Task, TaskDocument } from './schemas/task.schema';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { QueryTaskDto } from './dto/query-task.dto';
-import { User } from '../auth/schemas/user.schema'; // <-- Import User
+import { User, Role } from '../auth/schemas/user.schema';
 
 @Injectable()
 export class TasksService {
   constructor(@InjectModel(Task.name) private taskModel: Model<TaskDocument>) {}
 
   async create(createTaskDto: CreateTaskDto, user: User): Promise<Task> {
-    // Inject the user into the new task payload
+    // If admin provides 'assignedTo', use it. Otherwise, assign to the creator.
+    const taskOwner =
+      user.role === Role.ADMIN && createTaskDto.assignedTo
+        ? createTaskDto.assignedTo
+        : user._id;
+
     const createdTask = new this.taskModel({
       ...createTaskDto,
-      user,
+      user: taskOwner,
     });
     return createdTask.save();
   }
 
   async findAll(query: QueryTaskDto, user: User): Promise<Task[]> {
     const { status, priority, sortBy, sortOrder } = query;
+    const filter: any = {};
 
-    // Lock the query down to just this user's tasks
-    const filter: any = { user };
+    // Members only see their own tasks. Admins see all.
+    if (user.role === Role.MEMBER) {
+      filter.user = user._id;
+    }
 
     if (status) filter.status = status;
     if (priority) filter.priority = priority;
@@ -38,9 +50,16 @@ export class TasksService {
   }
 
   async findOne(id: string, user: User): Promise<Task> {
-    // Find by BOTH task ID and User
-    const task = await this.taskModel.findOne({ _id: id, user }).exec();
+    const task = await this.taskModel.findById(id).exec();
     if (!task) throw new NotFoundException(`Task with ID ${id} not found`);
+
+    // Check ownership for members
+    if (
+      user.role === Role.MEMBER &&
+      task.user.toString() !== user._id.toString()
+    ) {
+      throw new ForbiddenException('You are not allowed to view this task');
+    }
     return task;
   }
 
@@ -49,22 +68,21 @@ export class TasksService {
     updateTaskDto: UpdateTaskDto,
     user: User,
   ): Promise<Task> {
-    // Ensure we only update if the task belongs to the user
-    const existingTask = await this.taskModel
-      .findOneAndUpdate({ _id: id, user }, updateTaskDto, { new: true })
+    await this.findOne(id, user); // Throws 404/403 if invalid
+
+    const updatedTask = await this.taskModel
+      .findByIdAndUpdate(id, updateTaskDto, { new: true })
       .exec();
-    if (!existingTask)
-      throw new NotFoundException(`Task with ID ${id} not found`);
-    return existingTask;
+
+    if (!updatedTask) {
+      throw new NotFoundException(`Task with ID ${id} no longer exists`);
+    }
+    return updatedTask;
   }
 
   async remove(id: string, user: User): Promise<Task> {
-    // Ensure we only delete if the task belongs to the user
-    const deletedTask = await this.taskModel
-      .findOneAndDelete({ _id: id, user })
-      .exec();
-    if (!deletedTask)
-      throw new NotFoundException(`Task with ID ${id} not found`);
-    return deletedTask;
+    const task = await this.findOne(id, user);
+    await this.taskModel.findByIdAndDelete(id).exec();
+    return task; // task is already guaranteed to exist by findOne
   }
 }

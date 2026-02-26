@@ -18,9 +18,13 @@ import { AuthGuard } from '@nestjs/passport';
 import { GetUser } from '../auth/get-user.decorator'; // <-- Import decorator
 import { User } from '../auth/schemas/user.schema';
 import { use } from 'passport';
+import { RolesGuard } from '../auth/roles.guard';
+import { Roles } from '../auth/roles.decorator';
+import { Role } from '../auth/schemas/user.schema';
 
 @Controller('tasks')
-@UseGuards(AuthGuard())
+@UseGuards(AuthGuard(), RolesGuard) // <-- Apply RolesGuard here
+@Roles(Role.ADMIN, Role.MEMBER) // <-- Explicitly state who can access this controller
 export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
