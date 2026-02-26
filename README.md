@@ -1,6 +1,6 @@
 # Task Manager App (Full-Stack)
 
-## [cite_start]Quick Start (Docker Compose)
+## Quick Start (Docker Compose)
 
 The most efficient way to run this project is via Docker:
 
@@ -11,7 +11,7 @@ The most efficient way to run this project is via Docker:
    ```
 3. Access the app at `http://localhost:3000`.
 
-## [cite_start]Local Development (Manual) [cite: 72, 73]
+## Local Development (Manual) 
 
 ### Backend
 
@@ -25,7 +25,7 @@ The most efficient way to run this project is via Docker:
 2. Configure `.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:3001`.
 3. `npm run dev` (Starts on port 3000).
 
-## [cite_start]Seeding & Test Credentials [cite: 61]
+## Seeding & Test Credentials
 
 The database auto-seeds on first launch with:
 
