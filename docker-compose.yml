@@ -1,0 +1,51 @@
+# /docker-compose.yml
+version: "3.8"
+
+services:
+  mongodb:
+    image: mongo:latest
+    container_name: task_manager_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - task_network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: task_manager_backend
+    ports:
+      - "3001:3001"
+    environment:
+      # Notice we use 'mongodb' (the service name) instead of 'localhost' here
+      - MONGODB_URI=mongodb://mongodb:27017/task-manager
+      - JWT_SECRET=super_secret_dev_key
+    depends_on:
+      - mongodb
+    networks:
+      - task_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: task_manager_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      # This stays localhost because your browser makes the request, not the container
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    depends_on:
+      - backend
+    networks:
+      - task_network
+
+volumes:
+  mongo_data:
+
+networks:
+  task_network:
+    driver: bridge

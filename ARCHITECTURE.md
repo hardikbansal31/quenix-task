@@ -2,27 +2,25 @@
 
 ## 1. System Overview
 
-This is a full-stack Task Management application built to manage daily tasks securely. The system consists of three distinct layers:
+This is a containerized full-stack Task Management application designed for secure, multi-role task handling.
 
-1. **Frontend (Next.js):** Handles the user interface, routing, and state. It communicates with the backend via a REST API using a custom Axios instance.
-2. **Backend (NestJS):** Acts as the central API gateway. It validates incoming requests, enforces authentication/authorization, and executes business logic.
-3. **Database (MongoDB):** A NoSQL database that persistently stores user credentials and task records, accessed by the backend via Mongoose.
+1. **Frontend (Next.js):** A React-based interface using Tailwind CSS and an Axios interceptor for automated JWT handling.
+2. **Backend (NestJS):** A modular API enforcing Role-Based Access Control (RBAC) and JWT authentication.
+3. **Database (MongoDB):** Persistent storage for users and tasks, utilizing Mongoose for schema modeling.
+4. **Orchestration (Docker):** The entire stack is containerized using Docker Compose for consistent environment parity (Node 22).
 
 ## 2. Folder Structure
 
-The repository is split into two primary directories to separate concerns:
+The project is organized into two main services at the root:
 
-- **`/frontend`:** Built with Next.js using the modern App Router (`src/app`).
-  - `src/app`: Contains page-level routing (`/login`, `/register`, and the `/` dashboard).
-  - `src/lib`: Contains utility files, notably the `api.ts` Axios interceptor to keep components clean of token-attachment logic.
-- **`/backend`:** Built with NestJS, utilizing a domain-driven structure.
-  - `src/auth`: Contains the User schema, authentication service, controller, and JWT passport strategy.
-  - `src/tasks`: Contains the Task schema, CRUD service, controller, and DTOs for validation.
-  - Structuring by domain (Auth vs Tasks) ensures that as the application grows, features remain isolated and maintainable.
+- **`/frontend`:** Next.js App Router structure.
+  - `src/lib/api.ts`: Centralized Axios instance with request interceptors.
+- **`/backend`:** NestJS domain-driven modules.
+  - `src/auth`: Identity management, JWT strategy, and RolesGuard.
+  - `src/tasks`: Task logic with permission-aware services.
+- **Root:** Contains `docker-compose.yml` to orchestrate the services and MongoDB.
 
 ## 3. Database Schema
-
-We use two primary Mongoose schemas:
 
 **User Schema**
 
@@ -30,10 +28,13 @@ We use two primary Mongoose schemas:
 @Schema({ timestamps: true })
 export class User {
   @Prop({ required: true, unique: true })
-  email: string; // Type: String. Purpose: Unique identifier for login.
+  email: string;
 
   @Prop({ required: true })
-  password: string; // Type: String. Purpose: Stores the bcrypt-hashed password.
+  password: string; // Hashed via bcrypt
+
+  @Prop({ required: true, enum: ["admin", "member"], default: "member" })
+  role: string; // Bonus B: RBAC requirement
 }
 ```
 
@@ -43,54 +44,51 @@ export class User {
 @Schema({ timestamps: true })
 export class Task {
   @Prop({ required: true })
-  title: string; // Type: String. Purpose: The main heading of the task.
+  title: string;
 
   @Prop({ required: true, enum: TaskStatus, default: TaskStatus.PENDING })
-  status: TaskStatus; // Type: Enum (PENDING, IN_PROGRESS, COMPLETED). Purpose: Tracks progress.
+  status: TaskStatus;
 
   @Prop({ required: true, type: Date })
-  dueDate: Date; // Type: Date. Purpose: Deadline for the task.
-
-  @Prop({ required: true, enum: TaskPriority, default: TaskPriority.MEDIUM })
-  priority: TaskPriority; // Type: Enum (LOW, MEDIUM, HIGH). Purpose: Sorting urgency.
+  dueDate: Date;
 
   @Prop({ type: mongoose.Schema.Types.ObjectId, ref: "User", required: true })
-  user: User; // Type: ObjectId. Purpose: Creates a relational link to the User who created the task, ensuring data privacy.
+  user: User; // Relational link for ownership and RBAC scoping
 }
 ```
 
 ## 4. API Endpoints
 
-| Method | Path             | Auth Required | Request Body                               | Response Shape            |
-| :----- | :--------------- | :------------ | :----------------------------------------- | :------------------------ |
-| POST   | `/auth/register` | No            | `{ email, password }`                      | `{ message: string }`     |
-| POST   | `/auth/login`    | No            | `{ email, password }`                      | `{ accessToken: string }` |
-| GET    | `/tasks`         | Yes           | _Query params (optional)_                  | `Task[]`                  |
-| POST   | `/tasks`         | Yes           | `{ title, dueDate }`                       | `Task`                    |
-| PATCH  | `/tasks/:id`     | Yes           | `{ title?, status?, priority?, dueDate? }` | `Task`                    |
-| DELETE | `/tasks/:id`     | Yes           | None                                       | `Task`                    |
+| Method | Path             | Auth | Roles  | Description                                    |
+| :----- | :--------------- | :--- | :----- | :--------------------------------------------- |
+| POST   | `/auth/register` | No   | All    | Standard registration (defaults to 'member').  |
+| POST   | `/auth/login`    | No   | All    | Returns JWT with embedded role.                |
+| GET    | `/tasks`         | Yes  | Member | Returns only tasks owned by the user.          |
+| GET    | `/tasks`         | Yes  | Admin  | Returns all tasks in the database.             |
+| PATCH  | `/tasks/:id`     | Yes  | Member | Updates own task; returns 403 if unauthorized. |
+| PATCH  | `/tasks/:id`     | Yes  | Admin  | Can update any task (e.g., re-assigning).      |
+| DELETE | `/tasks/:id`     | Yes  | Admin  | Only Admins can perform hard deletes.          |
 
-## 5. Auth Flow
+## 5. Auth & RBAC Flow (Bonus B)
 
-Authentication is handled via JSON Web Tokens (JWT):
+Authentication and Authorization are enforced at the API level:
 
-1. **Register:** User submits an email and password. The backend hashes the password using `bcrypt` and saves the User to MongoDB.
-2. **Login:** User submits credentials. Backend verifies the password with `bcrypt`. If valid, it signs a JWT containing the user's `email` and `_id` and returns it.
-3. **Token Storage:** The Next.js client stores the JWT in the browser's `localStorage`.
-4. **Protected Routes:** A custom Axios interceptor automatically attaches this JWT as a `Bearer` token in the `Authorization` header of all outbound requests.
-5. **Backend Validation:** NestJS routes protected by `@UseGuards(AuthGuard())` intercept the request, validate the JWT signature via Passport, and inject the verified User object into the request context for the controller to use.
+1. **JWT Strategy:** Upon login, the user's `role` is embedded in the JWT payload.
+2. **RolesGuard:** A custom `RolesGuard` extracts the role from the validated token. It compares this against metadata provided by the `@Roles()` decorator.
+3. **Permission Scoping:** - Members are restricted via the `TasksService` using `user._id` in Mongoose queries.
+   - Unauthorized attempts (e.g., a Member trying to GET an Admin's task) return a **403 Forbidden** rather than a 404, ensuring the API distinguishes between "not found" and "not allowed."
 
 ## 6. AI Tools Used
 
 - **Tool:** Gemini
-- **Parts Built:** Scaffolded the initial NestJS boilerplate, generated the Next.js Tailwind UI code, and helped draft this architecture document.
-- **Review & Changes:** I actively reviewed the AI's generated code. For instance, I noticed the initial CRUD generation did not securely link Tasks to the Users who created them. I prompted the AI to refactor the data model, add a custom `@GetUser()` decorator, and update the database queries to filter by the authenticated user's ID. I also manually debugged a CORS issue between the two local ports.
+- **Usage:** Assisted in generating NestJS module templates and Tailwind layouts.
+- **Review & Changes:** I manually refactored the AI's standard `AuthGuard` implementation to include the `RolesGuard`. I also corrected the database seeding logic to ensure that a default Admin account is generated on the first run of the Docker container, enabling immediate testing of RBAC features.
 
 ## 7. Decisions & Trade-offs
 
-- **Decision:** Used Tailwind CSS for the frontend.
-  - _Why:_ Prioritized a clean, functional UI over a heavily customized design to move quickly and ensure readability.
-- **Decision:** Centralized Axios instance with an interceptor.
-  - _Why:_ Prevented code duplication. Rather than manually grabbing the token and setting headers in every single API call, the interceptor handles it invisibly.
-- **Trade-off:** Storing the JWT in `localStorage`.
-  - _Why/Improvement:_ This is easy to implement but vulnerable to Cross-Site Scripting (XSS) attacks. With more time, I would implement HttpOnly cookies to store the token, requiring a slightly more complex backend setup but providing significantly better security.
+- **Decision: Docker Compose with Node 22-Alpine.**
+  - _Why:_ To match the developer's local environment precisely while keeping the image size small for faster deployment.
+- **Decision: RBAC enforcement in the Service layer.**
+  - _Why:_ While Guards handle route-level access, enforcing ownership in the service layer ensures that Members cannot manipulate other users' data even if they guess a valid Task ID.
+- **Trade-off: Local JWT Storage.**
+  - _Improvement:_ For production, I would migrate to HttpOnly Cookies to mitigate XSS risks, but kept localStorage for this assessment to maintain a clear, testable integration for the frontend reviewer.
